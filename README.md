@@ -163,7 +163,7 @@ ros2 launch hikrobot_camera camera.launch.py serial_number:=<你的序列号>
 ros2 param list /hikrobot_camera
 ros2 param get  /hikrobot_camera frame_rate
 ros2 param set  /hikrobot_camera exposure_time 5000.0
-ros2 param set  /hikrobot_camera frame_rate 60.0
+
 ```
 - 仅 `exposure_time`、`gain`、`frame_rate`、`pixel_format` 可在运行时修改。
 
