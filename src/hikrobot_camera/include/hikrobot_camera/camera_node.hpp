@@ -51,6 +51,7 @@ private:
   rclcpp::Node::OnSetParametersCallbackHandle::SharedPtr param_callback_;
 
   int frame_count_{0};
+  int nodata_count_{0};  // 连续 MV_E_NODATA 次数：用于区分"低帧率"与"相机掉线"
   std::chrono::steady_clock::time_point stat_time_;
   
 };

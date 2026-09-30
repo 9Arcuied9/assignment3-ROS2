@@ -15,6 +15,8 @@ using namespace std::chrono_literals;
 namespace
 {
 
+constexpr int kNoDataProbeInterval = 3;
+
 std::string device_serial(const MV_CC_DEVICE_INFO & info)
 {
   const unsigned char * buf = info.SpecialInfo.stUsb3VInfo.chSerialNumber;
@@ -329,16 +331,13 @@ const std::vector<rclcpp::Parameter> & params)
       }
     }
 
-    // 相机在线，并且SDK设置失败 → 拒绝本次参数修改
     if (!ok && handle_ != nullptr)
     {
       result.successful = false;
       result.reason = "SDK 拒绝设置参数 " + name;
       return result;
     }
-    // 相机离线（handle_ == nullptr）：
-    // 此时 set_xxx 直接返回false，我们不拒绝参数，直接把新值存入缓存
-    // 等后续重连connect_camera的时候，会自动下发缓存参数
+
     else if (!ok && handle_ == nullptr)
     {
       if(name == "exposure_time") exposure_time_ = param.as_double();
@@ -369,20 +368,25 @@ void CameraNode::grab_loop()
       } else {
         std::memset(&frame, 0, sizeof(frame));
         const int ret = MV_CC_GetImageBuffer(handle_, &frame, 1000);
-
-        // MV_E_NODATA(0x80000007) 是"超时，未收到数据"，不是故障：
-        // 低帧率、长曝光时 1s 内没有新帧很正常，继续等待即可。
-        // 若把它当故障断开重连，重连后又下发同样的参数，会陷入死循环。
-        // MV_E_NODATA 是无符号字面量而 SDK 返回 int，故转成无符号再比，避免符号告警。
         if (static_cast<unsigned int>(ret) == MV_E_NODATA) {
           RCLCPP_DEBUG_THROTTLE(
             this->get_logger(), *this->get_clock(), 5000,
-            "等待帧数据超时（设定 %.1f fps），继续等待", frame_rate_);
+            "等待帧数据超时，继续等待");
+          if (++nodata_count_ >= kNoDataProbeInterval) {
+            nodata_count_ = 0;
+            if (!MV_CC_IsDeviceConnected(handle_)) {
+              RCLCPP_WARN(
+                this->get_logger(), "相机已断开，准备重连");
+              disconnect_camera();
+              retry = true;
+            }
+          }
         } else if (ret != MV_OK) {
           RCLCPP_WARN(this->get_logger(), "取帧失败(0x%x)，断开连接准备重连", ret);
           disconnect_camera();
           retry = true;
         } else {
+          nodata_count_ = 0;  // 收到帧，超时计数清零
           cv::Mat image;
           std::string encoding;
           if (convert_image(frame, image, encoding)) {
